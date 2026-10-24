@@ -1,5 +1,7 @@
 import os
 import uuid
+from urllib.parse import urlencode, urlparse, parse_qs, unquote
+
 import cv2
 import qrcode
 
@@ -53,76 +55,147 @@ app = Client(
 USER_STATES = {}
 
 
-# =========================
-# KEYBOARDS
-# =========================
+# ==========================================
+# WELCOME MESSAGE
+# ==========================================
 
-def mobile_share_markup():
-    # Contact request button must be a ReplyKeyboard button.
-    return ReplyKeyboardMarkup(
-        [
-            [
-                KeyboardButton(
-                    "📱 Share Mobile Number",
-                    request_contact=True,
-                )
-            ]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
+WELCOME_MESSAGE = (
+    "✨ **WELCOME TO MOBILE PAY** ✨\\n"
+    "━━━━━━━━━━━━━━━━━━━━━━\\n\\n"
+    "💙 Your smarter digital payment companion starts here.\\n\\n"
+    "🚀 **SMART • SIMPLE • USER-FRIENDLY**\\n"
+    "━━━━━━━━━━━━━━━━━━━━━━\\n"
+    "💳 Manage your account in one place\\n"
+    "📱 Register with your mobile number\\n"
+    "🔐 Set your personal 4-digit M-PIN\\n"
+    "📷 Generate and scan UPI QR codes\\n"
+    "💰 Submit deposit requests and view wallet records\\n"
+    "📜 Review your transaction history\\n"
+    "🛠️ Get help whenever you need it\\n\\n"
+    "🌟 **YOUR PAYMENTS. YOUR CONTROL.**\\n"
+    "Built to make your payment experience simple, clear, "
+    "and convenient.\\n\\n"
+    "🔒 Always verify the recipient and amount in your UPI app "
+    "before authorizing a payment.\\n\\n"
+    "👇 Tap below to explore Mobile Pay."
+)
+
+SUPPORT_URL = (
+    "https://t.me/" + str(SUPPORT_USERNAME).lstrip("@")
+)
+
+
+# ==========================================
+# HELPERS
+# ==========================================
+
+def money(value):
+    return float(value or 0)
+
+
+def valid_amount(value):
+    try:
+        amount = float(value)
+        if amount <= 0 or amount > 10000000:
+            return None
+        return round(amount, 2)
+    except (ValueError, TypeError):
+        return None
+
+
+def valid_upi(upi):
+    if not upi:
+        return False
+
+    upi = upi.strip()
+
+    if len(upi) > 100 or " " in upi:
+        return False
+
+    if upi.count("@") != 1:
+        return False
+
+    handle, provider = upi.split("@", 1)
+
+    return bool(handle and provider)
+
+
+def make_upi_uri(upi, name="Mobile Pay", amount=None, note=None):
+    """
+    Standard UPI payment intent.
+    Recipient must be a real, active UPI ID.
+    Generating this URI does not verify or send payment.
+    """
+    if not valid_upi(upi):
+        raise ValueError(
+            "Configured recipient is not a valid-looking UPI ID."
+        )
+
+    params = {
+        "pa": upi.strip(),
+        "pn": name[:80],
+        "cu": "INR",
+    }
+
+    if amount is not None:
+        amount = valid_amount(amount)
+        if amount is None:
+            raise ValueError("Invalid payment amount.")
+
+        params["am"] = f"{amount:.2f}"
+
+    if note:
+        params["tn"] = note[:80]
+
+    return "upi://pay?" + urlencode(params)
+
+
+def make_qr_file(data, filename):
+    img = qrcode.make(data)
+    img.save(filename)
+    return filename
 
 
 def main_menu_markup():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "👤 My Account",
-                callback_data="my_account",
+                "👤 My Account", callback_data="my_account"
             ),
             InlineKeyboardButton(
-                "💰 My Balance",
-                callback_data="my_balance",
+                "💰 My Balance", callback_data="my_balance"
             ),
         ],
         [
             InlineKeyboardButton(
-                "💵 Deposit Money",
-                callback_data="deposit_money",
+                "💵 Deposit Money", callback_data="deposit_money"
             ),
             InlineKeyboardButton(
-                "🪪 My UPI / QR",
-                callback_data="my_qr",
+                "🪪 My UPI / QR", callback_data="my_qr"
             ),
         ],
         [
             InlineKeyboardButton(
-                "🆔 Create New UPI ID",
-                callback_data="create_upi",
+                "🆔 Create New UPI ID", callback_data="create_upi"
             ),
             InlineKeyboardButton(
-                "💸 Pay Any UPI",
-                callback_data="pay_upi",
+                "💸 Pay Any UPI", callback_data="pay_upi"
             ),
         ],
         [
             InlineKeyboardButton(
-                "📷 Scan QR Code",
-                callback_data="scan_qr",
+                "📷 Scan QR Code", callback_data="scan_qr"
             ),
             InlineKeyboardButton(
-                "📜 My Transactions",
-                callback_data="my_transactions",
+                "📜 My Transactions", callback_data="my_transactions"
             ),
         ],
         [
             InlineKeyboardButton(
-                "⚠️ Terms & Charges",
-                callback_data="notice",
+                "⚠️ Terms & Charges", callback_data="notice"
             ),
             InlineKeyboardButton(
-                "🛠️ Support Admin",
-                url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}",
+                "🛠️ Support Admin", url=SUPPORT_URL
             ),
         ],
     ])
@@ -132,66 +205,114 @@ def admin_menu_markup():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "📊 Bot Statistics",
-                callback_data="admin_stats",
+                "📊 Bot Statistics", callback_data="admin_stats"
             ),
             InlineKeyboardButton(
-                "📢 Broadcast Message",
-                callback_data="admin_broadcast",
+                "📢 Broadcast", callback_data="admin_broadcast"
             ),
         ],
         [
             InlineKeyboardButton(
-                "➕ Add Balance",
-                callback_data="admin_add_balance",
+                "➕ Add Balance", callback_data="admin_add_balance"
             ),
             InlineKeyboardButton(
-                "➖ Deduct Balance",
-                callback_data="admin_sub_balance",
+                "➖ Deduct Balance", callback_data="admin_sub_balance"
             ),
         ],
         [
             InlineKeyboardButton(
-                "🔙 Exit Admin Panel",
-                callback_data="back_menu",
+                "🔙 Exit Admin Panel", callback_data="back_menu"
             ),
         ],
     ])
 
 
-def notice_keyboard_markup():
+def welcome_markup():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🚀 Start Engine",
-                callback_data="open_dashboard",
+                "🚀 OPEN MOBILE PAY", callback_data="open_dashboard"
             ),
         ],
         [
             InlineKeyboardButton(
-                "🛠️ Contact Admin Support",
-                url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}",
+                "🛠️ Contact Support", url=SUPPORT_URL
             ),
         ],
     ])
 
 
-def back_menu_markup():
+def back_markup():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🔙 Back to Main Menu",
-                callback_data="back_menu",
+                "🔙 Back to Main Menu", callback_data="back_menu"
+            ),
+        ],
+    ])
+
+
+def contact_markup():
+    return ReplyKeyboardMarkup(
+        [[
+            KeyboardButton(
+                "📱 Share Mobile Number",
+                request_contact=True,
             )
-        ]
-    ])
+        ]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
-# =========================
-# START COMMAND
-# =========================
+async def send_welcome(client, chat_id):
+    if START_IMAGE_URL:
+        await client.send_photo(
+            chat_id=chat_id,
+            photo=START_IMAGE_URL,
+            caption=WELCOME_MESSAGE,
+            reply_markup=welcome_markup(),
+        )
+    else:
+        await client.send_message(
+            chat_id=chat_id,
+            text=WELCOME_MESSAGE,
+            reply_markup=welcome_markup(),
+        )
 
-@app.on_message(filters.command("start"))
+
+async def send_registration_prompt(message):
+    if START_IMAGE_URL:
+        await message.reply_photo(
+            photo=START_IMAGE_URL,
+            caption=(
+                WELCOME_MESSAGE
+                + "\n\n📲 **First Step:** To register, "
+                "share your mobile number below."
+            ),
+        )
+
+    await message.reply_text(
+        "📱 **Share Mobile Number**\n\n"
+        "To continue registration, use the button below to "
+        "share your Telegram contact.",
+        reply_markup=contact_markup(),
+    )
+
+
+async def send_main_menu(client, chat_id):
+    await client.send_message(
+        chat_id,
+        START_MESSAGE or WELCOME_MESSAGE,
+        reply_markup=main_menu_markup(),
+    )
+
+
+# ==========================================
+# START / FORCE JOIN
+# ==========================================
+
+@app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message: Message):
     if not message.from_user:
         return
@@ -199,49 +320,44 @@ async def start_command(client, message: Message):
     user_id = message.from_user.id
 
     try:
-        member = await client.get_chat_member(
-            FORCE_CHANNEL,
-            user_id,
-        )
-
+        member = await client.get_chat_member(FORCE_CHANNEL, user_id)
         status = getattr(member.status, "value", member.status)
 
         if str(status).lower() in ("left", "kicked", "banned"):
-            raise ValueError("User has not joined the channel.")
+            raise ValueError("Channel membership required")
 
     except Exception:
-        channel = str(FORCE_CHANNEL).replace("@", "")
+        channel = str(FORCE_CHANNEL).lstrip("@")
 
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    "📢 Join Channel",
+                    "📢 Join Official Channel",
                     url=f"https://t.me/{channel}",
-                )
+                ),
             ],
             [
                 InlineKeyboardButton(
-                    "✅ Verify Join",
-                    callback_data="verify_join",
-                )
+                    "✅ Verify Join", callback_data="verify_join"
+                ),
             ],
         ])
 
-        join_text = (
-            "⚠️ **Force Join Required!**\n"
-            "Please join our official channel first "
-            "to use Mobile Pay bot."
+        text = (
+            "⚠️ **CHANNEL JOIN REQUIRED**\n\n"
+            "Before using Mobile Pay, please join our "
+            "official channel."
         )
 
         if START_IMAGE_URL:
             await message.reply_photo(
                 photo=START_IMAGE_URL,
-                caption=join_text,
+                caption=text,
                 reply_markup=keyboard,
             )
         else:
             await message.reply_text(
-                join_text,
+                text,
                 reply_markup=keyboard,
             )
 
@@ -250,81 +366,46 @@ async def start_command(client, message: Message):
     user = await get_user(user_id)
 
     if not user:
-        USER_STATES[user_id] = {
-            "step": "awaiting_mobile",
-        }
-
-        await message.reply_text(
-            "👋 Welcome to **Mobile Pay**!\n"
-            "Please share your mobile number for registration:",
-            reply_markup=mobile_share_markup(),
-        )
-
+        USER_STATES[user_id] = {"step": "awaiting_mobile"}
+        await send_registration_prompt(message)
     else:
-        if START_IMAGE_URL:
-            await message.reply_photo(
-                photo=START_IMAGE_URL,
-                caption=INITIAL_NOTICE_TEXT,
-                reply_markup=notice_keyboard_markup(),
-            )
-        else:
-            await message.reply_text(
-                INITIAL_NOTICE_TEXT,
-                reply_markup=notice_keyboard_markup(),
-            )
+        await send_welcome(client, user_id)
 
 
-# =========================
-# ADMIN COMMAND
-# =========================
-
-@app.on_message(filters.command("admin"))
+@app.on_message(filters.command("admin") & filters.private)
 async def admin_panel_command(client, message: Message):
     if not message.from_user:
         return
 
-    user_id = message.from_user.id
-
-    if user_id != OWNER_ID:
-        await message.reply_text(
-            "❌ Access Denied! "
-            "This command is only for the Bot Admin."
-        )
+    if message.from_user.id != OWNER_ID:
+        await message.reply_text("❌ Access Denied.")
         return
 
     await message.reply_text(
-        "👑 **Admin Control Panel**\n"
-        "Select an operation below:",
+        "👑 **MOBILE PAY ADMIN PANEL**\n"
+        "Choose an action below:",
         reply_markup=admin_menu_markup(),
     )
 
-
-# =========================
-# VERIFY FORCE JOIN
-# =========================
 
 @app.on_callback_query(filters.regex("^verify_join$"))
 async def verify_join_callback(client, callback: CallbackQuery):
     user_id = callback.from_user.id
 
     try:
-        member = await client.get_chat_member(
-            FORCE_CHANNEL,
-            user_id,
-        )
-
+        member = await client.get_chat_member(FORCE_CHANNEL, user_id)
         status = getattr(member.status, "value", member.status)
 
         if str(status).lower() in ("left", "kicked", "banned"):
             await callback.answer(
-                "❌ You haven't joined the channel yet!",
+                "Please join the channel first.",
                 show_alert=True,
             )
             return
 
     except Exception:
         await callback.answer(
-            "❌ Please join the channel first!",
+            "Please join the channel first.",
             show_alert=True,
         )
         return
@@ -337,35 +418,23 @@ async def verify_join_callback(client, callback: CallbackQuery):
     user = await get_user(user_id)
 
     if not user:
-        USER_STATES[user_id] = {
-            "step": "awaiting_mobile",
-        }
-
+        USER_STATES[user_id] = {"step": "awaiting_mobile"}
         await callback.message.reply_text(
-            "✅ Verification Successful!\n"
-            "Please share your mobile number to proceed:",
-            reply_markup=mobile_share_markup(),
+            "✅ Channel verification successful."
         )
-
+        await callback.message.reply_text(
+            "to register, share your mobile number:",
+            reply_markup=contact_markup(),
+        )
     else:
-        if START_IMAGE_URL:
-            await callback.message.reply_photo(
-                photo=START_IMAGE_URL,
-                caption=INITIAL_NOTICE_TEXT,
-                reply_markup=notice_keyboard_markup(),
-            )
-        else:
-            await callback.message.reply_text(
-                INITIAL_NOTICE_TEXT,
-                reply_markup=notice_keyboard_markup(),
-            )
+        await send_welcome(client, user_id)
 
     await callback.answer()
 
 
-# =========================
-# CONTACT / MOBILE HANDLER
-# =========================
+# ==========================================
+# CONTACT REGISTRATION
+# ==========================================
 
 @app.on_message(filters.contact & filters.private)
 async def contact_handler(client, message: Message):
@@ -373,37 +442,33 @@ async def contact_handler(client, message: Message):
         return
 
     user_id = message.from_user.id
+    state = USER_STATES.get(user_id, {})
 
-    if (
-        user_id not in USER_STATES
-        or USER_STATES[user_id].get("step") != "awaiting_mobile"
-    ):
+    if state.get("step") != "awaiting_mobile":
         return
 
-    # Accept only the user's own contact.
-    if (
-        message.contact.user_id is not None
-        and message.contact.user_id != user_id
-    ):
+    contact_user_id = message.contact.user_id
+
+    if contact_user_id and contact_user_id != user_id:
         await message.reply_text(
-            "❌ कृपया अपना ही मोबाइल नंबर शेयर करें।",
-            reply_markup=mobile_share_markup(),
+            "❌ Please share your own mobile number.",
+            reply_markup=contact_markup(),
         )
         return
 
-    USER_STATES[user_id]["mobile"] = message.contact.phone_number
-    USER_STATES[user_id]["step"] = "awaiting_name"
+    state["mobile"] = message.contact.phone_number
+    state["step"] = "awaiting_name"
 
     await message.reply_text(
-        "✅ Mobile number received.\n"
-        "Now, please send your full name for your account profile:",
+        "✅ Mobile number received.\n\n"
+        "Now send your full name:",
         reply_markup=ReplyKeyboardRemove(),
     )
 
 
-# =========================
-# TEXT HANDLER
-# =========================
+# ==========================================
+# TEXT / REGISTRATION / PAYMENT FLOW
+# ==========================================
 
 @app.on_message(
     filters.text
@@ -416,63 +481,45 @@ async def text_handler(client, message: Message):
 
     user_id = message.from_user.id
     text = message.text.strip()
+    state = USER_STATES.get(user_id)
 
-    if user_id not in USER_STATES:
+    if not state:
         return
 
-    state = USER_STATES[user_id]
     step = state.get("step")
 
-    # -------------------------
-    # REGISTER NAME
-    # -------------------------
-
+    # New account: full name
     if step == "awaiting_name":
-        if not text:
-            await message.reply_text(
-                "❌ Please enter your full name."
-            )
-            return
-
-        full_name = text
         mobile = state.get("mobile")
 
         if not mobile:
-            USER_STATES[user_id] = {
-                "step": "awaiting_mobile",
-            }
+            USER_STATES[user_id] = {"step": "awaiting_mobile"}
             await message.reply_text(
-                "📱 Please share your mobile number first.",
-                reply_markup=mobile_share_markup(),
+                "Please share your mobile number first.",
+                reply_markup=contact_markup(),
             )
             return
 
-        custom_upi = await register_user(
-            user_id,
-            full_name,
-            mobile,
-        )
+        custom_upi = await register_user(user_id, text, mobile)
 
-        USER_STATES[user_id] = {
-            "step": "setting_mpin",
-        }
+        USER_STATES[user_id] = {"step": "setting_mpin"}
 
         await message.reply_text(
-            f"🎉 Account Created Successfully!\n"
-            f"Your UPI ID: `{custom_upi}`\n\n"
-            "Now, please set a secure **4-digit M-PIN** "
-            "(e.g. `1234`) for transactions:"
+            "🎉 **ACCOUNT CREATED!**\n\n"
+            f"Account ID: `{user_id}`\n"
+            f"Database UPI field: `{custom_upi}`\n\n"
+            "⚠️ Do not treat the custom UPI ID stored in the database as a "
+            "real bank UPI ID unless a bank/UPI provider "
+            "has verified it.\n\n"
+            "Now set your 4-digit M-PIN:"
         )
+        return
 
-    # -------------------------
-    # SET M-PIN
-    # -------------------------
-
-    elif step == "setting_mpin":
+    # Set M-PIN
+    if step == "setting_mpin":
         if not text.isdigit() or len(text) != 4:
             await message.reply_text(
-                "❌ Invalid M-PIN format. "
-                "Please enter exactly **4 digits** (e.g. `1234`):"
+                "❌ The M-PIN must contain exactly 4 digits."
             )
             return
 
@@ -480,62 +527,56 @@ async def text_handler(client, message: Message):
         USER_STATES.pop(user_id, None)
 
         await message.reply_text(
-            "✅ M-PIN set successfully!\n\n"
+            "✅ Your M-PIN has been set.\n\n"
             + INITIAL_NOTICE_TEXT,
-            reply_markup=notice_keyboard_markup(),
+            reply_markup=welcome_markup(),
         )
+        return
 
-    # -------------------------
-    # CREATE CUSTOM UPI ID
-    # -------------------------
-
-    elif step == "creating_upi":
+    # Create custom database UPI label
+    if step == "creating_upi":
         clean_name = "".join(
-            char for char in text.lower()
-            if char.isalnum() or char in "._-"
+            c for c in text.lower()
+            if c.isalnum() or c in "._-"
         )
 
         if not clean_name:
             await message.reply_text(
-                "❌ Invalid UPI name. Please try again."
+                "❌ Please send a valid name or number."
             )
             return
 
         new_upi = f"{clean_name}@mbp"
-
         await update_custom_upi(user_id, new_upi)
         USER_STATES.pop(user_id, None)
 
         await message.reply_text(
-            "✅ New UPI ID Created Successfully!\n"
-            f"📍 `{new_upi}`",
-            reply_markup=back_menu_markup(),
+            f"✅ Database ID updated: `{new_upi}`\n\n"
+            "⚠️ This is only a custom app ID. It does not automatically create a "
+            "real UPI ID or bank account.",
+            reply_markup=back_markup(),
         )
+        return
 
-    # -------------------------
-    # DEPOSIT AMOUNT
-    # -------------------------
+    # Deposit amount
+    if step == "awaiting_deposit_amount":
+        amount = valid_amount(text)
 
-    elif step == "awaiting_deposit_amount":
-        try:
-            amount = float(text)
-
-            if amount <= 0:
-                raise ValueError
-
-        except ValueError:
+        if amount is None:
             await message.reply_text(
-                "❌ Invalid amount. Enter a valid number:"
+                "❌ Enter a valid amount, such as 100 or 250.50."
+            )
+            return
+
+        if not valid_upi(COMPANY_UPI):
+            await message.reply_text(
+                "❌ COMPANY_UPI is not configured correctly. "
+                "Set your bank-linked UPI ID in Heroku Config Vars."
             )
             return
 
         deposit_id = str(uuid.uuid4())[:8]
-
-        await create_deposit_request(
-            deposit_id,
-            user_id,
-            amount,
-        )
+        await create_deposit_request(deposit_id, user_id, amount)
 
         USER_STATES[user_id] = {
             "step": "awaiting_deposit_proof",
@@ -546,28 +587,32 @@ async def text_handler(client, message: Message):
         qr_path = f"deposit_{deposit_id}.png"
 
         try:
-            qr_data = (
-                f"upi://pay?pa={COMPANY_UPI}"
-                f"&am={amount:.2f}&pn=MobilePay"
+            uri = make_upi_uri(
+                COMPANY_UPI,
+                name="Mobile Pay",
+                amount=amount,
+                note=f"Deposit {deposit_id}",
             )
-
-            img = qrcode.make(qr_data)
-            img.save(qr_path)
+            make_qr_file(uri, qr_path)
 
             await message.reply_photo(
                 photo=qr_path,
                 caption=(
-                    "💵 **Deposit Request Generated**\n"
-                    f"Amount: ₹{amount:.2f}\n"
-                    f"UPI ID: `{COMPANY_UPI}`\n\n"
-                    "Scan the QR code and pay. Once paid, "
-                    "send the payment screenshot/receipt here:"
+                    "💵 **DEPOSIT PAYMENT QR**\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 Amount: ₹{amount:.2f}\n"
+                    f"🏦 UPI ID: `{COMPANY_UPI}`\n"
+                    f"🆔 Request ID: `{deposit_id}`\n\n"
+                    "1. Scan the QR code using your UPI app.\n"
+                    "2. Verify the UPI ID and amount in the app.\n"
+                    "3. After completing payment, send the receipt/screenshot.\n\n"
+                    "⚠️ The admin must verify the payment. Generating a QR code is "
+                    "not proof of a successful payment."
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton(
-                            "🔙 Cancel",
-                            callback_data="back_menu",
+                            "🔙 Cancel", callback_data="back_menu"
                         )
                     ]
                 ]),
@@ -577,325 +622,269 @@ async def text_handler(client, message: Message):
             if os.path.exists(qr_path):
                 os.remove(qr_path)
 
-    # -------------------------
-    # ENTER RECIPIENT UPI
-    # -------------------------
+        return
 
-    elif step == "pay_upi_id":
-        if "@" not in text or " " in text:
+    # Recipient UPI ID
+    if step == "pay_upi_id":
+        if not valid_upi(text):
             await message.reply_text(
-                "❌ Please enter a valid-looking UPI ID, "
-                "for example `merchant@bank`."
+                "❌ Enter a valid UPI ID, such as `name@bank`."
             )
             return
 
-        USER_STATES[user_id]["recipient_upi"] = text
-        USER_STATES[user_id]["step"] = "pay_amount"
+        state["recipient_upi"] = text
+        state["step"] = "pay_amount"
 
         await message.reply_text(
-            "💵 Please enter the amount (INR) you wish to send:"
+            "💵 Now send the payment amount in INR:"
         )
+        return
 
-    # -------------------------
-    # ENTER PAYMENT AMOUNT
-    # -------------------------
+    # Payment amount
+    if step == "pay_amount":
+        amount = valid_amount(text)
 
-    elif step == "pay_amount":
-        try:
-            amount = float(text)
-
-            if amount <= 0:
-                raise ValueError
-
-        except ValueError:
+        if amount is None:
             await message.reply_text(
-                "❌ Invalid amount. Please enter a valid number:"
+                "❌ Enter a valid amount, such as 100 or 250.50."
             )
             return
 
-        USER_STATES[user_id]["amount"] = amount
-        USER_STATES[user_id]["step"] = "pay_mpin"
+        state["amount"] = amount
+        state["step"] = "pay_mpin"
 
         await message.reply_text(
-            "🔐 Please enter your **4-digit M-PIN** "
-            "to authorize this wallet operation:"
+            "🔐 Enter your 4-digit M-PIN to continue:"
         )
+        return
 
-    # -------------------------
-    # CHECK M-PIN
-    # -------------------------
-
-    elif step == "pay_mpin":
+    # M-PIN verification, then generate a real UPI intent QR
+    if step == "pay_mpin":
         user = await get_user(user_id)
 
         if not user:
             USER_STATES.pop(user_id, None)
             await message.reply_text(
-                "❌ आपका अकाउंट नहीं मिला। कृपया /start करें।"
+                "❌ Account not found. Please use /start."
             )
             return
 
-        if user.get("mpin") != text:
+        if str(user.get("mpin", "")) != text:
             USER_STATES.pop(user_id, None)
-
             await message.reply_text(
-                "❌ Incorrect M-PIN. Operation cancelled.",
+                "❌ Incorrect M-PIN. The operation has been cancelled.",
                 reply_markup=main_menu_markup(),
             )
             return
 
         amount = state.get("amount")
-        recipient = (
-            state.get("recipient_upi")
-            or state.get("scanned_upi")
-        )
+        recipient = state.get("recipient_upi") or state.get("scanned_upi")
 
-        if amount is None or not recipient:
+        if not amount or not valid_upi(recipient):
             USER_STATES.pop(user_id, None)
             await message.reply_text(
-                "❌ Payment details missing. Please try again.",
+                "❌ The payment details are invalid. Please try again.",
                 reply_markup=main_menu_markup(),
             )
             return
 
-        balance = float(user.get("balance", 0) or 0)
+        # No wallet debit here: without a payment API this bot
+        # cannot send money or confirm an external UPI transaction.
+        qr_path = f"pay_{uuid.uuid4().hex[:8]}.png"
 
-        if balance < amount:
-            USER_STATES.pop(user_id, None)
+        try:
+            uri = make_upi_uri(
+                recipient,
+                name="UPI Payment",
+                amount=amount,
+                note="Payment via Mobile Pay",
+            )
+            make_qr_file(uri, qr_path)
 
-            await message.reply_text(
-                "❌ Insufficient balance in your wallet!",
+            await message.reply_photo(
+                photo=qr_path,
+                caption=(
+                    "💸 **UPI PAYMENT QR READY**\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 Recipient: `{recipient}`\n"
+                    f"💰 Amount: ₹{amount:.2f}\n\n"
+                    "1. Scan the QR code using your bank/UPI app.\n"
+                    "2. Carefully verify the recipient and amount.\n"
+                    "3. Authorize the payment yourself in your UPI app.\n\n"
+                    "⚠️ Mobile Pay has not sent any money, and this bot "
+                    "does not have a payment API. Without payment verification, "
+                    "the payment cannot be marked as SUCCESS."
+                ),
                 reply_markup=main_menu_markup(),
             )
-            return
 
-        # This updates the internal wallet balance only.
-        # It does not perform an actual UPI bank transfer.
-        await update_balance(user_id, -amount)
+            await log_transaction(
+                user_id,
+                "UPI_QR_GENERATED",
+                amount,
+                recipient,
+                "PENDING_EXTERNAL_PAYMENT",
+            )
 
-        await log_transaction(
-            user_id,
-            "DEBIT",
-            amount,
-            recipient,
-            "SUCCESS",
-        )
+        finally:
+            if os.path.exists(qr_path):
+                os.remove(qr_path)
 
         USER_STATES.pop(user_id, None)
+        return
 
-        receipt = (
-            "✅ **Wallet Operation Recorded**\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 **To:** `{recipient}`\n"
-            f"💰 **Amount:** ₹{amount:.2f}\n"
-            "🏢 **Company Fee:** ₹0.00\n"
-            "🕒 **Status:** RECORDED IN INTERNAL WALLET\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ This bot has not sent an actual UPI transfer."
-        )
-
-        await message.reply_text(
-            receipt,
-            reply_markup=main_menu_markup(),
-        )
-
-    # -------------------------
-    # ADMIN BROADCAST
-    # -------------------------
-
-    elif step == "admin_awaiting_broadcast":
+    # Admin broadcast
+    if step == "admin_awaiting_broadcast":
         if user_id != OWNER_ID:
             USER_STATES.pop(user_id, None)
             return
 
-        all_users = await get_all_users()
+        users = await get_all_users()
         sent = 0
         failed = 0
 
-        status_msg = await message.reply_text(
-            "⏳ Broadcasting message to all users..."
+        status_message = await message.reply_text(
+            "⏳ Sending broadcast..."
         )
 
-        for user_data in all_users:
+        for item in users:
             try:
                 await app.send_message(
-                    user_data["user_id"],
+                    item["user_id"],
                     f"📢 **ADMIN ANNOUNCEMENT**\n\n{text}",
                 )
                 sent += 1
-
             except Exception:
                 failed += 1
 
         USER_STATES.pop(user_id, None)
 
-        await status_msg.edit_text(
-            "✅ **Broadcast Completed!**\n"
-            f"• Total Sent: {sent}\n"
+        await status_message.edit_text(
+            "✅ **Broadcast Complete**\n"
+            f"• Sent: {sent}\n"
             f"• Failed: {failed}",
             reply_markup=admin_menu_markup(),
         )
+        return
 
-    # -------------------------
-    # ADMIN ADD BALANCE
-    # -------------------------
-
-    elif step == "admin_awaiting_add_bal":
+    # Admin add balance
+    if step == "admin_awaiting_add_bal":
         if user_id != OWNER_ID:
             USER_STATES.pop(user_id, None)
             return
 
         try:
             parts = text.split()
-
             if len(parts) != 2:
-                raise ValueError(
-                    "Use format: USER_ID AMOUNT"
-                )
+                raise ValueError("Please enter USER_ID AMOUNT.")
 
             target_id = int(parts[0])
-            amount = float(parts[1])
+            amount = valid_amount(parts[1])
 
-            if amount <= 0:
-                raise ValueError(
-                    "Amount must be greater than zero."
-                )
+            if amount is None:
+                raise ValueError("Invalid amount.")
 
-            target_user = await get_user(target_id)
-
-            if not target_user:
+            if not await get_user(target_id):
                 raise ValueError("User not found.")
 
             await update_balance(target_id, amount)
-
             await log_transaction(
-                target_id,
-                "CREDIT_ADMIN",
-                amount,
-                "ADMIN",
-                "SUCCESS",
+                target_id, "CREDIT_ADMIN", amount, "ADMIN", "SUCCESS"
             )
 
             await message.reply_text(
-                f"✅ Added ₹{amount:.2f} "
-                f"to User ID: `{target_id}`",
+                f"✅ ₹{amount:.2f} to the internal wallet. User ID: `{target_id}`",
                 reply_markup=admin_menu_markup(),
             )
 
             try:
                 await app.send_message(
                     target_id,
-                    "🎉 **Wallet Credited!**\n"
-                    f"Admin added ₹{amount:.2f} "
-                    "to your Mobile Pay wallet.",
+                    f"🎉 The admin added ₹{amount:.2f} was added.",
                 )
             except Exception:
                 pass
 
             USER_STATES.pop(user_id, None)
 
-        except Exception as e:
+        except Exception as error:
             await message.reply_text(
-                "❌ Error! Use format: `USER_ID AMOUNT`\n"
-                f"Details: {e}"
+                f"❌ Error: {error}\nFormat: `USER_ID AMOUNT`"
             )
+        return
 
-    # -------------------------
-    # ADMIN DEDUCT BALANCE
-    # -------------------------
-
-    elif step == "admin_awaiting_sub_bal":
+    # Admin deduct balance
+    if step == "admin_awaiting_sub_bal":
         if user_id != OWNER_ID:
             USER_STATES.pop(user_id, None)
             return
 
         try:
             parts = text.split()
-
             if len(parts) != 2:
-                raise ValueError(
-                    "Use format: USER_ID AMOUNT"
-                )
+                raise ValueError("Please enter USER_ID AMOUNT.")
 
             target_id = int(parts[0])
-            amount = float(parts[1])
+            amount = valid_amount(parts[1])
 
-            if amount <= 0:
-                raise ValueError(
-                    "Amount must be greater than zero."
-                )
+            if amount is None:
+                raise ValueError("Invalid amount.")
 
             target_user = await get_user(target_id)
 
             if not target_user:
                 raise ValueError("User not found.")
 
-            current_balance = float(
-                target_user.get("balance", 0) or 0
-            )
+            balance = money(target_user.get("balance", 0))
 
-            if amount > current_balance:
-                raise ValueError(
-                    "Amount is greater than the user's current balance."
-                )
+            if amount > balance:
+                raise ValueError("The user's balance is insufficient.")
 
             await update_balance(target_id, -amount)
-
             await log_transaction(
-                target_id,
-                "DEBIT_ADMIN",
-                amount,
-                "ADMIN",
-                "SUCCESS",
+                target_id, "DEBIT_ADMIN", amount, "ADMIN", "SUCCESS"
             )
 
             await message.reply_text(
-                f"✅ Deducted ₹{amount:.2f} "
-                f"from User ID: `{target_id}`",
+                f"✅ ₹{amount:.2f} deducted. User ID: `{target_id}`",
                 reply_markup=admin_menu_markup(),
             )
 
             try:
                 await app.send_message(
                     target_id,
-                    "⚠️ **Wallet Debited**\n"
-                    f"Admin deducted ₹{amount:.2f} "
-                    "from your Mobile Pay wallet.",
+                    f"⚠️ The admin deducted ₹{amount:.2f} from your internal wallet.",
                 )
             except Exception:
                 pass
 
             USER_STATES.pop(user_id, None)
 
-        except Exception as e:
+        except Exception as error:
             await message.reply_text(
-                "❌ Error! Use format: `USER_ID AMOUNT`\n"
-                f"Details: {e}"
+                f"❌ Error: {error}\nFormat: `USER_ID AMOUNT`"
             )
+        return
 
 
-# =========================
-# CALLBACK HANDLER
-# =========================
+# ==========================================
+# INLINE CALLBACK HANDLER
+# ==========================================
 
 @app.on_callback_query()
 async def callback_handler(client, callback: CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data or ""
 
-    # Restrict admin callbacks to the owner.
-    admin_callbacks = {
+    admin_actions = {
         "admin_stats",
         "admin_broadcast",
         "admin_add_balance",
         "admin_sub_balance",
     }
 
-    if data in admin_callbacks and user_id != OWNER_ID:
-        await callback.answer(
-            "❌ Access denied.",
-            show_alert=True,
-        )
+    if data in admin_actions and user_id != OWNER_ID:
+        await callback.answer("❌ Access denied.", show_alert=True)
         return
 
     user = await get_user(user_id)
@@ -908,88 +897,72 @@ async def callback_handler(client, callback: CallbackQuery):
         except Exception:
             pass
 
-        await client.send_message(
-            user_id,
-            START_MESSAGE,
-            reply_markup=main_menu_markup(),
-        )
+        await send_main_menu(client, user_id)
+        return
 
-    elif data == "my_account":
+    if data == "my_account":
         if not user:
-            await callback.answer(
-                "❌ Account not found. Please use /start.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
         await callback.message.edit_text(
-            "👤 **Account Details**\n\n"
+            "👤 **MY ACCOUNT**\n\n"
             f"• Name: {user.get('full_name', 'N/A')}\n"
             f"• Mobile: {user.get('mobile', 'N/A')}\n"
-            f"• Primary UPI: `{user.get('custom_upi', 'N/A')}`\n"
-            "• KYC Status: Not verified by this bot",
-            reply_markup=back_menu_markup(),
+            f"• Database ID: `{user.get('custom_upi', 'N/A')}`\n\n"
+            "⚠️ Do not treat this custom ID as a real UPI ID "
+            "unless it has been issued by a bank/UPI provider.",
+            reply_markup=back_markup(),
         )
 
     elif data == "my_balance":
         if not user:
-            await callback.answer(
-                "❌ Account not found.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        balance = float(user.get("balance", 0) or 0)
-
         await callback.message.edit_text(
-            "💰 **Wallet Balance**\n\n"
-            f"Available Balance: **₹{balance:.2f}**",
-            reply_markup=back_menu_markup(),
+            "💰 **INTERNAL WALLET BALANCE**\n\n"
+            f"Available Balance: ₹{money(user.get('balance')):.2f}\n\n"
+            "This is an internal app record, not your bank balance.",
+            reply_markup=back_markup(),
         )
 
     elif data == "deposit_money":
         if not user:
-            await callback.answer(
-                "❌ Account not found. Please use /start.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        USER_STATES[user_id] = {
-            "step": "awaiting_deposit_amount",
-        }
-
+        USER_STATES[user_id] = {"step": "awaiting_deposit_amount"}
         await callback.message.edit_text(
-            "💵 Enter the amount (INR) you wish to add to your wallet:"
+            "💵 How much would you like to deposit? Send the amount in INR:",
+            reply_markup=back_markup(),
         )
 
     elif data == "my_qr":
         if not user:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+
+        # This bot has one configured, real receiving UPI ID.
+        # Do not present a generated @mbp database ID as bank UPI.
+        if not valid_upi(COMPANY_UPI):
             await callback.answer(
-                "❌ Account not found.",
+                "Set a valid UPI ID in the COMPANY_UPI Config Var.",
                 show_alert=True,
             )
             return
 
-        upi = user.get("custom_upi")
-
-        if not upi:
-            await callback.answer(
-                "❌ UPI ID not found.",
-                show_alert=True,
-            )
-            return
-
-        qr_img_path = f"qr_{user_id}.png"
+        qr_path = f"company_qr_{user_id}.png"
 
         try:
-            qr_data = (
-                f"upi://pay?pa={upi}"
-                f"&pn={user.get('full_name', 'MobilePay')}"
+            uri = make_upi_uri(
+                COMPANY_UPI,
+                name="Mobile Pay",
+                note=f"Mobile Pay user {user_id}",
             )
+            make_qr_file(uri, qr_path)
 
-            img = qrcode.make(qr_data)
-            img.save(qr_img_path)
+            await callback.answer()
 
             try:
                 await callback.message.delete()
@@ -998,285 +971,234 @@ async def callback_handler(client, callback: CallbackQuery):
 
             await client.send_photo(
                 chat_id=user_id,
-                photo=qr_img_path,
+                photo=qr_path,
                 caption=(
-                    "🪪 **Your Mobile Pay QR & UPI**\n"
-                    f"UPI ID: `{upi}`\n"
-                    "यह QR कोड UPI ID दिखाता है। "
-                    "वास्तविक भुगतान आपके बैंक/UPI प्रदाता पर निर्भर है।"
+                    "🪪 **MOBILE PAY RECEIVING QR**\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏦 UPI ID: `{COMPANY_UPI}`\n\n"
+                    "This QR uses the real UPI ID configured in Config Vars "
+                    "Before paying, verify the recipient details in your UPI "
+                    "app.\n\n"
+                    "⚠️ This is the configured receiving UPI ID for all users, "
+                    "not a separate personal bank account for each user."
                 ),
-                reply_markup=back_menu_markup(),
+                reply_markup=back_markup(),
             )
 
         finally:
-            if os.path.exists(qr_img_path):
-                os.remove(qr_img_path)
+            if os.path.exists(qr_path):
+                os.remove(qr_path)
 
     elif data == "create_upi":
         if not user:
-            await callback.answer(
-                "❌ Account not found.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        USER_STATES[user_id] = {
-            "step": "creating_upi",
-        }
+        USER_STATES[user_id] = {"step": "creating_upi"}
 
         await callback.message.edit_text(
-            "🆔 Send your desired custom ID name/number "
-            "(e.g. `hakeeb07`) to generate your new `@mbp` ID:",
-            reply_markup=back_menu_markup(),
+            "🆔 Send a name for your custom database ID:\n"
+            "Example: `hakeeb07`\n\n"
+            "⚠️ This will not create a real bank UPI ID.",
+            reply_markup=back_markup(),
         )
 
     elif data == "pay_upi":
         if not user:
-            await callback.answer(
-                "❌ Account not found.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        USER_STATES[user_id] = {
-            "step": "pay_upi_id",
-        }
+        USER_STATES[user_id] = {"step": "pay_upi_id"}
 
         await callback.message.edit_text(
-            "💸 Send the recipient UPI ID "
-            "(e.g. `merchant@paytm`):",
-            reply_markup=back_menu_markup(),
+            "💸 Send the recipient's real UPI ID:\n"
+            "Example: `name@bank`",
+            reply_markup=back_markup(),
         )
 
     elif data == "scan_qr":
         if not user:
-            await callback.answer(
-                "❌ Account not found.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        USER_STATES[user_id] = {
-            "step": "awaiting_qr_photo",
-        }
+        USER_STATES[user_id] = {"step": "awaiting_qr_photo"}
 
         await callback.message.edit_text(
-            "📷 Please send the QR code photo/screenshot to scan:",
-            reply_markup=back_menu_markup(),
+            "📷 Send a clear photo of the UPI QR code.",
+            reply_markup=back_markup(),
         )
 
     elif data == "my_transactions":
         if not user:
-            await callback.answer(
-                "❌ Account not found.",
-                show_alert=True,
-            )
+            await callback.answer("Please use /start first.", show_alert=True)
             return
 
-        txs = await get_user_transactions(user_id)
+        transactions = await get_user_transactions(user_id)
+        output = "📜 **RECENT TRANSACTIONS**\n━━━━━━━━━━━━━━━━━━━━\n"
 
-        tx_text = (
-            "📜 **Recent Transactions**\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-        )
-
-        if not txs:
-            tx_text += "No transactions found."
+        if not transactions:
+            output += "No transactions have been recorded yet."
         else:
-            for tx in txs:
-                tx_text += (
+            for tx in transactions:
+                output += (
                     f"• {tx.get('type', 'N/A')} | "
                     f"₹{tx.get('amount', 0)} | "
-                    f"To: {tx.get('recipient', 'N/A')} | "
+                    f"{tx.get('recipient', 'N/A')} | "
                     f"{tx.get('status', 'N/A')}\n"
                 )
 
         await callback.message.edit_text(
-            tx_text,
-            reply_markup=back_menu_markup(),
+            output,
+            reply_markup=back_markup(),
         )
 
     elif data == "notice":
-        notice_text = (
-            "⚠️ **Terms & Subscription Notice**\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"• Monthly subscription fee: ₹{MONTHLY_FEE}.\n"
-            "• This bot's wallet records do not themselves "
-            "perform real-time bank transfers.\n"
-            "• Keep your M-PIN secure and confidential."
-        )
-
         await callback.message.edit_text(
-            notice_text,
-            reply_markup=back_menu_markup(),
+            "⚠️ **TERMS & PAYMENT NOTICE**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"• Monthly fee configuration: ₹{MONTHLY_FEE}\n"
+            "• A UPI QR only creates a payment intent.\n"
+            "• This code does not include a payment gateway API.\n"
+            "• Real payment must be verified using UPI app/bank records "
+            "or an authorized provider.\n"
+            "• Changing the internal wallet balance through the admin panel "
+            "is not a bank transfer.\n"
+            "• Never share your M-PIN with anyone.",
+            reply_markup=back_markup(),
         )
 
     elif data == "admin_stats":
-        all_users = await get_all_users()
-
-        total_balance = sum(
-            float(u.get("balance", 0) or 0)
-            for u in all_users
-        )
+        users = await get_all_users()
+        total = sum(money(item.get("balance")) for item in users)
 
         await callback.message.edit_text(
-            "📊 **Bot Statistics**\n\n"
-            f"• Total Users: {len(all_users)}\n"
-            f"• Total System Balance: ₹{total_balance:.2f}",
+            "📊 **BOT STATISTICS**\n\n"
+            f"• Total Users: {len(users)}\n"
+            f"• Internal Wallet Total: ₹{total:.2f}",
             reply_markup=admin_menu_markup(),
         )
 
     elif data == "admin_broadcast":
-        USER_STATES[user_id] = {
-            "step": "admin_awaiting_broadcast",
-        }
+        USER_STATES[user_id] = {"step": "admin_awaiting_broadcast"}
 
         await callback.message.edit_text(
-            "📢 Send the broadcast message text you wish to send "
-            "to all registered users:"
+            "📢 Send the message you want to broadcast to all users:"
         )
 
     elif data == "admin_add_balance":
-        USER_STATES[user_id] = {
-            "step": "admin_awaiting_add_bal",
-        }
+        USER_STATES[user_id] = {"step": "admin_awaiting_add_bal"}
 
         await callback.message.edit_text(
-            "➕ Send `USER_ID AMOUNT` (e.g. `123456789 500`):"
+            "➕ Send in this format:\n`USER_ID AMOUNT`"
         )
 
     elif data == "admin_sub_balance":
-        USER_STATES[user_id] = {
-            "step": "admin_awaiting_sub_bal",
-        }
+        USER_STATES[user_id] = {"step": "admin_awaiting_sub_bal"}
 
         await callback.message.edit_text(
-            "➖ Send `USER_ID AMOUNT` to deduct balance "
-            "(e.g. `123456789 100`):"
+            "➖ Send in this format:\n`USER_ID AMOUNT`"
         )
 
     elif data.startswith("approve_"):
         if user_id != OWNER_ID:
+            await callback.answer("Access denied.", show_alert=True)
+            return
+
+        deposit_id = data[len("approve_"):]
+        request = await get_deposit_request(deposit_id)
+
+        if not request or request.get("status") != "PENDING":
             await callback.answer(
-                "❌ Access denied.",
+                "This request has already been processed.",
                 show_alert=True,
             )
             return
 
-        dep_id = data[len("approve_"):]
-        dep_req = await get_deposit_request(dep_id)
+        # Manual approval only. Admin must verify actual receipt/payment.
+        await update_deposit_status(deposit_id, "APPROVED")
+        await update_balance(request["user_id"], request["amount"])
 
-        if dep_req and dep_req.get("status") == "PENDING":
-            await update_deposit_status(dep_id, "APPROVED")
+        await log_transaction(
+            request["user_id"],
+            "CREDIT_DEPOSIT",
+            request["amount"],
+            "DEPOSIT",
+            "ADMIN_APPROVED",
+        )
 
-            await update_balance(
-                dep_req["user_id"],
-                dep_req["amount"],
+        try:
+            await callback.message.edit_caption(
+                caption=(callback.message.caption or "")
+                + "\n\n✅ **STATUS: ADMIN APPROVED**"
             )
+        except Exception:
+            pass
 
-            await log_transaction(
-                dep_req["user_id"],
-                "CREDIT_DEPOSIT",
-                dep_req["amount"],
-                "DEPOSIT",
-                "SUCCESS",
-            )
+        await app.send_message(
+            request["user_id"],
+            "✅ **Deposit Request Approved**\n"
+            f"₹{request['amount']:.2f} has been added to your internal wallet.",
+        )
 
-            try:
-                await callback.message.edit_caption(
-                    caption=(
-                        (callback.message.caption or "")
-                        + "\n\n✅ **STATUS: APPROVED**"
-                    )
-                )
-            except Exception:
-                pass
-
-            await app.send_message(
-                dep_req["user_id"],
-                "✅ **Deposit Approved!**\n"
-                f"₹{dep_req['amount']:.2f} has been added "
-                "to your internal wallet balance.",
-            )
-
-            await callback.answer("Deposit approved.")
-
-        else:
-            await callback.answer(
-                "❌ Request already processed or not found!",
-                show_alert=True,
-            )
+        await callback.answer("Deposit approved.")
 
     elif data.startswith("decline_"):
         if user_id != OWNER_ID:
+            await callback.answer("Access denied.", show_alert=True)
+            return
+
+        deposit_id = data[len("decline_"):]
+        request = await get_deposit_request(deposit_id)
+
+        if not request or request.get("status") != "PENDING":
             await callback.answer(
-                "❌ Access denied.",
+                "This request has already been processed.",
                 show_alert=True,
             )
             return
 
-        dep_id = data[len("decline_"):]
-        dep_req = await get_deposit_request(dep_id)
+        await update_deposit_status(deposit_id, "DECLINED")
 
-        if dep_req and dep_req.get("status") == "PENDING":
-            await update_deposit_status(dep_id, "DECLINED")
-
-            try:
-                await callback.message.edit_caption(
-                    caption=(
-                        (callback.message.caption or "")
-                        + "\n\n❌ **STATUS: DECLINED**"
-                    )
-                )
-            except Exception:
-                pass
-
-            await app.send_message(
-                dep_req["user_id"],
-                "❌ **Deposit Declined!**\n"
-                f"Your deposit request for ₹{dep_req['amount']:.2f} "
-                "was declined by Admin.",
+        try:
+            await callback.message.edit_caption(
+                caption=(callback.message.caption or "")
+                + "\n\n❌ **STATUS: DECLINED**"
             )
+        except Exception:
+            pass
 
-            await callback.answer("Deposit declined.")
+        await app.send_message(
+            request["user_id"],
+            "❌ Your deposit request was declined by the admin.",
+        )
 
-        else:
-            await callback.answer(
-                "❌ Request already processed or not found!",
-                show_alert=True,
-            )
+        await callback.answer("Deposit declined.")
 
     elif data == "back_menu":
         USER_STATES.pop(user_id, None)
+        await callback.answer()
 
         try:
             if callback.message.photo:
                 await callback.message.edit_caption(
-                    START_MESSAGE,
+                    caption=START_MESSAGE or WELCOME_MESSAGE,
                     reply_markup=main_menu_markup(),
                 )
             else:
                 await callback.message.edit_text(
-                    START_MESSAGE,
+                    START_MESSAGE or WELCOME_MESSAGE,
                     reply_markup=main_menu_markup(),
                 )
-
         except Exception:
-            await client.send_message(
-                user_id,
-                START_MESSAGE,
-                reply_markup=main_menu_markup(),
-            )
-
-        await callback.answer()
+            await send_main_menu(client, user_id)
 
     else:
         await callback.answer()
 
 
-# =========================
-# PHOTO HANDLER
-# =========================
+# ==========================================
+# PHOTO HANDLER: DEPOSIT RECEIPT / QR SCAN
+# ==========================================
 
 @app.on_message(filters.photo & filters.private)
 async def photo_handler(client, message: Message):
@@ -1284,23 +1206,16 @@ async def photo_handler(client, message: Message):
         return
 
     user_id = message.from_user.id
+    state = USER_STATES.get(user_id, {})
+    step = state.get("step")
 
-    if user_id not in USER_STATES:
-        return
-
-    step = USER_STATES[user_id].get("step")
-
-    # -------------------------
-    # DEPOSIT PAYMENT PROOF
-    # -------------------------
-
+    # Deposit receipt submission
     if step == "awaiting_deposit_proof":
-        dep_id = USER_STATES[user_id].get("deposit_id")
-        amount = USER_STATES[user_id].get("amount")
-
+        deposit_id = state.get("deposit_id")
+        amount = state.get("amount")
         user = await get_user(user_id)
 
-        if not dep_id or amount is None:
+        if not deposit_id or amount is None:
             USER_STATES.pop(user_id, None)
             await message.reply_text(
                 "❌ Deposit request not found. Please try again."
@@ -1310,29 +1225,30 @@ async def photo_handler(client, message: Message):
         USER_STATES.pop(user_id, None)
 
         await message.reply_text(
-            "⏳ Your payment proof has been submitted to Admin "
-            "for verification. You will be notified once reviewed."
+            "⏳ Your receipt has been sent to the admin. "
+            "You will be notified after the payment is verified."
         )
 
         admin_caption = (
-            "🔔 **NEW DEPOSIT REQUEST!**\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 **Name:** {user.get('full_name', 'N/A') if user else 'N/A'}\n"
-            f"🆔 **User ID:** `{user_id}`\n"
-            f"📱 **Mobile:** `{user.get('mobile', 'N/A') if user else 'N/A'}`\n"
-            f"💵 **Amount:** ₹{amount:.2f}\n"
-            f"🔑 **Deposit ID:** `{dep_id}`"
+            "🔔 **NEW DEPOSIT REQUEST**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 Name: {user.get('full_name', 'N/A') if user else 'N/A'}\n"
+            f"🆔 User ID: `{user_id}`\n"
+            f"📱 Mobile: `{user.get('mobile', 'N/A') if user else 'N/A'}`\n"
+            f"💰 Amount: ₹{amount:.2f}\n"
+            f"🧾 Deposit ID: `{deposit_id}`\n\n"
+            "Approve only after checking the receipt and verifying the actual payment."
         )
 
-        admin_keyboard = InlineKeyboardMarkup([
+        buttons = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
                     "✅ Approve",
-                    callback_data=f"approve_{dep_id}",
+                    callback_data=f"approve_{deposit_id}",
                 ),
                 InlineKeyboardButton(
                     "❌ Decline",
-                    callback_data=f"decline_{dep_id}",
+                    callback_data=f"decline_{deposit_id}",
                 ),
             ]
         ])
@@ -1341,62 +1257,82 @@ async def photo_handler(client, message: Message):
             chat_id=OWNER_ID,
             photo=message.photo.file_id,
             caption=admin_caption,
-            reply_markup=admin_keyboard,
+            reply_markup=buttons,
         )
+        return
 
-    # -------------------------
-    # SCAN UPI QR CODE
-    # -------------------------
-
-    elif step == "awaiting_qr_photo":
+    # QR scanning
+    if step == "awaiting_qr_photo":
         file_path = await message.download()
         scanned_data = None
 
         try:
-            img = cv2.imread(file_path)
+            image = cv2.imread(file_path)
 
-            if img is not None:
+            if image is not None:
                 detector = cv2.QRCodeDetector()
-                scanned_data, points, _ = detector.detectAndDecode(img)
+                scanned_data, points, _ = detector.detectAndDecode(image)
 
-        except Exception as e:
-            print(f"QR scan error: {e}")
+        except Exception as error:
+            print(f"QR scan error: {error}")
 
         finally:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
 
-        if scanned_data and "pa=" in scanned_data:
-            try:
-                upi_id = (
-                    scanned_data.split("pa=", 1)[1]
-                    .split("&", 1)[0]
-                )
-            except Exception:
-                upi_id = scanned_data
-
-            USER_STATES[user_id]["scanned_upi"] = upi_id
-            USER_STATES[user_id]["step"] = "pay_amount"
-
+        if not scanned_data:
             await message.reply_text(
-                "✅ QR Code Scanned Successfully!\n"
-                f"📍 UPI ID: `{upi_id}`\n\n"
-                "💵 Please enter the amount (INR):"
+                "❌ Could not read the QR code. Please send a clear, complete QR photo."
             )
+            return
 
-        else:
+        try:
+            parsed = urlparse(scanned_data)
+            params = parse_qs(parsed.query)
+
+            # Accept standard UPI intent QR only.
+            if parsed.scheme.lower() != "upi":
+                raise ValueError("Not a UPI intent")
+
+            recipient = unquote(params.get("pa", [""])[0])
+            qr_amount = params.get("am", [""])[0]
+
+            if not valid_upi(recipient):
+                raise ValueError("Missing/invalid UPI recipient")
+
+        except Exception:
             await message.reply_text(
-                "❌ No valid UPI QR code detected in the image. "
-                "Please try again or click menu.",
-                reply_markup=main_menu_markup(),
+                "❌ This does not appear to be a valid UPI QR code. "
+                "Please send a valid UPI QR code."
             )
+            return
 
-            USER_STATES.pop(user_id, None)
+        USER_STATES[user_id] = {
+            "step": "pay_upi_id",
+            "recipient_upi": recipient,
+        }
+
+        message_text = (
+            "✅ **UPI QR SCANNED**\n"
+            f"📍 Recipient UPI: `{recipient}`\n"
+        )
+
+        if qr_amount:
+            message_text += f"💰 Amount in QR: ₹{qr_amount}\n"
+
+        message_text += (
+            "\nSend an amount to continue with the payment. "
+            "The bot will then generate a payment QR. "
+            "You must complete the payment yourself in your UPI app."
+        )
+
+        await message.reply_text(message_text)
+        return
 
 
-# =========================
-# RUN BOT
-# =========================
+# ==========================================
+# RUN
+# ==========================================
 
 if __name__ == "__main__":
     app.run()
