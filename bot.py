@@ -2,7 +2,6 @@ import os
 import uuid
 import cv2
 import qrcode
-from pyzbar.pyzbar import decode
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from config import (
@@ -419,14 +418,15 @@ async def photo_handler(client, message: Message):
         elif step == "awaiting_qr_photo":
             file_path = await message.download()
             img = cv2.imread(file_path)
-            decoded_objects = decode(img)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
             scanned_data = None
-            for obj in decoded_objects:
-                scanned_data = obj.data.decode("utf-8")
-                break
+
+            try:
+                if img is not None:
+                    detector = cv2.QRCodeDetector()
+                    scanned_data, points, _ = detector.detectAndDecode(img)
+            finally:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
 
             if scanned_data and "pa=" in scanned_data:
                 try:
