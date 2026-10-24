@@ -4,7 +4,6 @@ motor==3.3.2
 qrcode==7.4.2
 numpy==1.26.4
 opencv-python-headless==4.8.1.78
-pyzbar==0.1.9
 pillow==10.1.0
 dnspython==2.4.2
 apscheduler==3.10.4
