@@ -60,23 +60,23 @@ USER_STATES = {}
 # ==========================================
 
 WELCOME_MESSAGE = (
-    "✨ **WELCOME TO MOBILE PAY** ✨\\n"
-    "━━━━━━━━━━━━━━━━━━━━━━\\n\\n"
-    "💙 Your smarter digital payment companion starts here.\\n\\n"
-    "🚀 **SMART • SIMPLE • USER-FRIENDLY**\\n"
-    "━━━━━━━━━━━━━━━━━━━━━━\\n"
-    "💳 Manage your account in one place\\n"
-    "📱 Register with your mobile number\\n"
-    "🔐 Set your personal 4-digit M-PIN\\n"
-    "📷 Generate and scan UPI QR codes\\n"
-    "💰 Submit deposit requests and view wallet records\\n"
-    "📜 Review your transaction history\\n"
-    "🛠️ Get help whenever you need it\\n\\n"
-    "🌟 **YOUR PAYMENTS. YOUR CONTROL.**\\n"
+    "✨ **WELCOME TO MOBILE PAY** ✨\n"
+    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "💙 Your smarter digital payment companion starts here.\n\n"
+    "🚀 **SMART • SIMPLE • USER-FRIENDLY**\n"
+    "━━━━━━━━━━━━━━━━━━━━━━\n"
+    "💳 Manage your account in one place\n"
+    "📱 Register with your mobile number\n"
+    "🔐 Set your personal 4-digit M-PIN\n"
+    "📷 Generate and scan UPI QR codes\n"
+    "💰 Submit deposit requests and view wallet records\n"
+    "📜 Review your transaction history\n"
+    "🛠️ Get help whenever you need it\n\n"
+    "🌟 **YOUR PAYMENTS. YOUR CONTROL.**\n"
     "Built to make your payment experience simple, clear, "
-    "and convenient.\\n\\n"
+    "and convenient.\n\n"
     "🔒 Always verify the recipient and amount in your UPI app "
-    "before authorizing a payment.\\n\\n"
+    "before authorizing a payment.\n\n"
     "👇 Tap below to explore Mobile Pay."
 )
 
@@ -800,7 +800,7 @@ async def text_handler(client, message: Message):
             try:
                 await app.send_message(
                     target_id,
-                    f"🎉 The admin added ₹{amount:.2f} was added.",
+                    f"🎉 The admin added ₹{amount:.2f} to your internal wallet.",
                 )
             except Exception:
                 pass
@@ -1307,24 +1307,31 @@ async def photo_handler(client, message: Message):
             )
             return
 
-        USER_STATES[user_id] = {
-            "step": "pay_upi_id",
-            "recipient_upi": recipient,
-        }
+        parsed_amount = valid_amount(qr_amount) if qr_amount else None
 
-        message_text = (
-            "✅ **UPI QR SCANNED**\n"
-            f"📍 Recipient UPI: `{recipient}`\n"
-        )
-
-        if qr_amount:
-            message_text += f"💰 Amount in QR: ₹{qr_amount}\n"
-
-        message_text += (
-            "\nSend an amount to continue with the payment. "
-            "The bot will then generate a payment QR. "
-            "You must complete the payment yourself in your UPI app."
-        )
+        if parsed_amount is not None:
+            USER_STATES[user_id] = {
+                "step": "pay_mpin",
+                "recipient_upi": recipient,
+                "amount": parsed_amount,
+            }
+            message_text = (
+                "✅ **UPI QR SCANNED**\\n"
+                f"📍 Recipient UPI: `{recipient}`\\n"
+                f"💰 Amount from QR: ₹{parsed_amount:.2f}\\n\\n"
+                "Enter your 4-digit M-PIN to continue. "
+                "You must authorize the payment yourself in your UPI app."
+            )
+        else:
+            USER_STATES[user_id] = {
+                "step": "pay_amount",
+                "recipient_upi": recipient,
+            }
+            message_text = (
+                "✅ **UPI QR SCANNED**\\n"
+                f"📍 Recipient UPI: `{recipient}`\\n\\n"
+                "This QR has no valid amount. Send the amount in INR to continue."
+            )
 
         await message.reply_text(message_text)
         return
