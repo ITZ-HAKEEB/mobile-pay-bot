@@ -1,0 +1,52 @@
+{
+  "name": "Mobile Pay Telegram Bot",
+  "description": "Telegram Wallet & UPI Payment Bot with Admin Panel, Manual Approve/Decline, and Pyrogram",
+  "repository": "https://github.com/ITZ-HAKEEB/mobile-pay-bot",
+  "keywords": ["telegram", "bot", "upi", "admin-panel", "payment", "pyrogram"],
+  "env": {
+    "API_ID": {
+      "description": "Your Telegram API ID from my.telegram.org",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Your Telegram API Hash from my.telegram.org",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Telegram Bot Token from @BotFather",
+      "required": true
+    },
+    "MONGO_URI": {
+      "description": "MongoDB Connection String (MongoDB Atlas)",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram Numeric ID (e.g. 123456789)",
+      "required": true
+    },
+    "FORCE_CHANNEL": {
+      "description": "Telegram Channel Username for Force Join (e.g. @THE_LINK_PALACE)",
+      "required": true
+    },
+    "START_IMAGE_URL": {
+      "description": "Direct image URL for start banner",
+      "value": "https://telegra.ph/file/0c324976c7c251bb425c7.jpg",
+      "required": true
+    },
+    "SUPPORT_USERNAME": {
+      "description": "Support Telegram Username without @ (e.g. llMR_BADALll)",
+      "value": "llMR_BADALll",
+      "required": true
+    },
+    "COMPANY_UPI": {
+      "description": "Company Collection UPI ID",
+      "value": "company@mbp",
+      "required": true
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
